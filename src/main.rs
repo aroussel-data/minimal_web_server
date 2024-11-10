@@ -11,7 +11,9 @@ fn main() {
 
     for stream in listener.incoming() {
         let _stream = stream.unwrap();
-        handle_connection(_stream);
+        thread::spawn(|| {
+            handle_connection(_stream);
+        });
     }
 }
 
