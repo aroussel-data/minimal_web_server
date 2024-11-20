@@ -17,6 +17,7 @@ fn main() {
             handle_connection(_stream);
         });
     }
+    println!("Shutting down");
 }
 
 fn handle_connection(mut stream: TcpStream) {

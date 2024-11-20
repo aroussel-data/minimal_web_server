@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::thread;
 
 pub struct ThreadPool {
-    sender: Sender<Job>,
+    sender: Option<Sender<Job>>,
     workers: Vec<Worker>,
 }
 
@@ -25,11 +25,11 @@ impl ThreadPool {
         let rx = Arc::new(Mutex::new(rx));
 
         for id in 0..size {
-            let mut my_worker = Worker::new(id, Arc::clone(&rx));
+            let my_worker = Worker::new(id, Arc::clone(&rx));
             workers_vector.push(my_worker);
         }
         return ThreadPool {
-            sender: tx.clone(),
+            sender: Some(tx.clone()),
             workers: workers_vector,
         };
     }
@@ -38,23 +38,48 @@ impl ThreadPool {
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
-        self.sender.send(job).unwrap();
+        self.sender.as_ref().unwrap().send(job).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+
+        for worker in &mut self.workers {
+            println!("Shutting down worker {}", worker.id);
+            if let Some(thread) = worker.handle.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
 
 struct Worker {
     id: usize,
-    handle: thread::JoinHandle<()>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<Receiver<Job>>>) -> Worker {
         let thread = thread::spawn(move || loop {
-            let task = receiver.lock().unwrap().recv().unwrap();
-            println!("Worker {id} received job");
-            task();
+            let task = receiver.lock().unwrap().recv();
+
+            match task {
+                Ok(job) => {
+                    println!("Worker {id} received job...executing");
+                    job();
+                }
+                Err(_) => {
+                    println!("Worker {id} disconnected...shutting down");
+                    break;
+                }
+            }
         });
 
-        return Worker { id, handle: thread };
+        return Worker {
+            id,
+            handle: Some(thread),
+        };
     }
 }
